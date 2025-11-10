@@ -1,0 +1,150 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: creatorhub-postgres
+    restart: unless-stopped
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: creatorhub
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: creatorhub_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U creatorhub']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - creatorhub-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: creatorhub-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes --requirepass dev_password
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - creatorhub-network
+
+  # MongoDB (for messages)
+  mongodb:
+    image: mongo:5
+    container_name: creatorhub-mongodb
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: creatorhub
+      MONGO_INITDB_ROOT_PASSWORD: dev_password
+      MONGO_INITDB_DATABASE: messages
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - creatorhub-network
+
+  # Elasticsearch
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: creatorhub-elasticsearch
+    restart: unless-stopped
+    ports:
+      - '9200:9200'
+      - '9300:9300'
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:9200/_cluster/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - creatorhub-network
+
+  # RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: creatorhub-rabbitmq
+    restart: unless-stopped
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    environment:
+      RABBITMQ_DEFAULT_USER: creatorhub
+      RABBITMQ_DEFAULT_PASS: dev_password
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - creatorhub-network
+
+  # MinIO (S3-compatible storage)
+  minio:
+    image: minio/minio:latest
+    container_name: creatorhub-minio
+    restart: unless-stopped
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - creatorhub-network
+
+  # Mailhog (Email testing)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: creatorhub-mailhog
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+    networks:
+      - creatorhub-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongodb_data:
+  elasticsearch_data:
+  rabbitmq_data:
+  minio_data:
+
+networks:
+  creatorhub-network:
+    driver: bridge
